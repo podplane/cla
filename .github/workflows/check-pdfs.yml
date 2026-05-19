@@ -1,0 +1,54 @@
+name: Check PDFs Against Markdown
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: 3.9.0.2
+
+      - uses: typst-community/setup-typst@v4
+        with:
+          typst-version: 0.14.2
+
+      - name: Install PDF text extraction tools
+        run: sudo apt-get update && sudo apt-get install -y ghostscript
+
+      - name: Read committed PDF date
+        run: |
+          pdf_date="$(
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          dates = []
+          for path in ("podplane-icla.pdf", "podplane-ccla.pdf"):
+              data = Path(path).read_bytes().decode("latin-1", errors="ignore")
+              match = re.search(r"<xmp:CreateDate>(\d{4}-\d{2}-\d{2})T", data)
+              if not match:
+                  raise SystemExit(f"Could not find xmp:CreateDate in {path}")
+              dates.append(match.group(1))
+
+          if len(set(dates)) != 1:
+              raise SystemExit(f"Committed PDFs have different dates: {dates}")
+
+          print(dates[0])
+          PY
+          )"
+          echo "Using committed PDF date: $pdf_date"
+          echo "PDF_DATE=$pdf_date" >> "$GITHUB_ENV"
+
+      - run: |
+          make check || {
+            echo "Note that the \`make setup\` script installs a Git pre-commit hook to help prevent this from happening." >&2
+            exit 1
+          }
